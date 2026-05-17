@@ -30,6 +30,21 @@ def parse_args():
         action="store_true",
         help="Require an entry threshold to be met in two consecutive years.",
     )
+    parser.add_argument(
+        "--use-skillab-demand",
+        action="store_true",
+        help="Blend Skillab job demand analytics into next-sector predictions.",
+    )
+    parser.add_argument("--skillab-username")
+    parser.add_argument("--skillab-password")
+    parser.add_argument("--skillab-token")
+    parser.add_argument("--demand-limit", type=int, default=500)
+    parser.add_argument("--demand-source")
+    parser.add_argument("--demand-current-from-date")
+    parser.add_argument("--demand-current-to-date")
+    parser.add_argument("--demand-baseline-from-date")
+    parser.add_argument("--demand-baseline-to-date")
+    parser.add_argument("--demand-timeout", type=int, default=60)
     return parser.parse_args()
 
 
@@ -44,6 +59,17 @@ def main():
         min_mentions=args.min_mentions,
         min_adoption_rate=args.min_adoption_rate,
         require_stability=args.require_stability,
+        use_skillab_demand=args.use_skillab_demand,
+        skillab_username=args.skillab_username,
+        skillab_password=args.skillab_password,
+        skillab_token=args.skillab_token,
+        demand_limit=args.demand_limit,
+        demand_source=args.demand_source,
+        demand_current_from_date=args.demand_current_from_date,
+        demand_current_to_date=args.demand_current_to_date,
+        demand_baseline_from_date=args.demand_baseline_from_date,
+        demand_baseline_to_date=args.demand_baseline_to_date,
+        demand_timeout=args.demand_timeout,
     )
 
 

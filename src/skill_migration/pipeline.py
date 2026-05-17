@@ -12,6 +12,7 @@ from .diffusion import (
     diffusion_leaderboard,
     predict_next_sectors,
 )
+from .demand import fetch_job_demand_signals
 from .esco import load_occupation_mapping, load_skill_mapping
 from .features import aggregate_skill_sector_year, build_profile_skill_sector_table
 from .profiles import explode_profile_skills_occupations, load_profiles
@@ -26,6 +27,17 @@ def run_pipeline(
     min_mentions=3,
     min_adoption_rate=0.005,
     require_stability=False,
+    use_skillab_demand=False,
+    skillab_username=None,
+    skillab_password=None,
+    skillab_token=None,
+    demand_limit=500,
+    demand_source=None,
+    demand_current_from_date=None,
+    demand_current_to_date=None,
+    demand_baseline_from_date=None,
+    demand_baseline_to_date=None,
+    demand_timeout=60,
 ):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -62,7 +74,30 @@ def run_pipeline(
     )
     diffusion_events = build_diffusion_events(entries)
     leaderboard = diffusion_leaderboard(diffusion_events, skill_sector_year)
-    predictions = predict_next_sectors(skill_sector_year, entries)
+
+    job_demand = None
+    if use_skillab_demand:
+        print("Fetching Skillab job demand signals...")
+        job_demand = fetch_job_demand_signals(
+            username=skillab_username,
+            password=skillab_password,
+            token=skillab_token,
+            limit=demand_limit,
+            source=demand_source,
+            current_from_date=demand_current_from_date,
+            current_to_date=demand_current_to_date,
+            baseline_from_date=demand_baseline_from_date,
+            baseline_to_date=demand_baseline_to_date,
+            timeout=demand_timeout,
+        )
+        job_demand.to_csv(output_dir / "job_demand_signals.csv", index=False)
+        print(f"Loaded {len(job_demand):,} job demand skill signals")
+
+    predictions = predict_next_sectors(
+        skill_sector_year,
+        entries,
+        job_demand=job_demand,
+    )
 
     profile_skill_sector.to_parquet(output_dir / "profile_skill_sector.parquet", index=False)
     skill_sector_year.to_parquet(output_dir / "skill_sector_year.parquet", index=False)
@@ -82,6 +117,7 @@ def run_pipeline(
         "diffusion_events": diffusion_events,
         "leaderboard": leaderboard,
         "predictions": predictions,
+        "job_demand": job_demand,
     }
 
 
@@ -133,6 +169,8 @@ def print_summary(leaderboard, diffusion_events, predictions):
                     "skill_label",
                     "candidate_sector",
                     "prediction_score",
+                    "job_demand_score",
+                    "sector_similarity_score",
                     "recent_adoption_rate",
                 ]
             ]

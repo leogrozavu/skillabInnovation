@@ -146,7 +146,13 @@ def compute_skill_sector_entropy(skill_sector_year):
     )
 
 
-def predict_next_sectors(skill_sector_year, diffusion_events, lookback_years=3, top_n=5):
+def predict_next_sectors(
+    skill_sector_year,
+    diffusion_events,
+    job_demand=None,
+    lookback_years=3,
+    top_n=5,
+):
     df = skill_sector_year.copy()
     if df.empty:
         return pd.DataFrame()
@@ -202,11 +208,26 @@ def predict_next_sectors(skill_sector_year, diffusion_events, lookback_years=3, 
         how="left",
     )
     predictions["global_growth"] = predictions["global_growth"].fillna(0)
-    predictions["prediction_score"] = (
-        predictions["growth_rate"].clip(lower=0) * 100
-        + np.log1p(predictions["recent_mentions"])
-        + np.log1p(predictions["global_growth"].clip(lower=0))
+    predictions["profile_growth_score"] = min_max_score(
+        predictions["growth_rate"].clip(lower=0)
     )
+    predictions["recent_adoption_score"] = min_max_score(
+        predictions["recent_adoption_rate"]
+    )
+    predictions["global_profile_growth_score"] = min_max_score(
+        predictions["global_growth"].clip(lower=0)
+    )
+    predictions = add_sector_similarity_score(predictions, recent, diffusion_events)
+    predictions = add_job_demand_scores(predictions, job_demand)
+    predictions["prediction_score"] = (
+        0.30 * predictions["profile_growth_score"]
+        + 0.15 * predictions["recent_adoption_score"]
+        + 0.15 * predictions["global_profile_growth_score"]
+        + 0.25 * predictions["job_demand_score"]
+        + 0.10 * predictions["job_demand_growth_score"]
+        + 0.05 * predictions["sector_similarity_score"]
+    )
+    predictions["reason"] = predictions.apply(build_prediction_reason, axis=1)
 
     return (
         predictions.sort_values(["skill_label", "prediction_score"], ascending=[True, False])
@@ -214,3 +235,105 @@ def predict_next_sectors(skill_sector_year, diffusion_events, lookback_years=3, 
         .head(top_n)
         .drop(columns=["entered_sector", "already_entered"], errors="ignore")
     )
+
+
+def add_job_demand_scores(predictions, job_demand):
+    if job_demand is None or job_demand.empty:
+        predictions["job_demand_count"] = 0.0
+        predictions["baseline_job_demand_count"] = 0.0
+        predictions["job_demand_growth"] = 0.0
+        predictions["job_demand_score"] = 0.0
+        predictions["job_demand_growth_score"] = 0.0
+        return predictions
+
+    demand_columns = [
+        "skill_uri",
+        "job_demand_count",
+        "baseline_job_demand_count",
+        "job_demand_growth",
+        "job_demand_score",
+        "job_demand_growth_score",
+    ]
+    available_columns = [column for column in demand_columns if column in job_demand.columns]
+    predictions = predictions.merge(
+        job_demand[available_columns].drop_duplicates("skill_uri"),
+        on="skill_uri",
+        how="left",
+    )
+    for column in demand_columns:
+        if column != "skill_uri" and column not in predictions.columns:
+            predictions[column] = 0.0
+    fill_columns = [column for column in demand_columns if column != "skill_uri"]
+    predictions[fill_columns] = predictions[fill_columns].fillna(0.0)
+    return predictions
+
+
+def add_sector_similarity_score(predictions, recent, entries):
+    sector_vectors = (
+        recent.pivot_table(
+            index="sector_proxy",
+            columns="skill_uri",
+            values="adoption_rate",
+            aggfunc="mean",
+            fill_value=0,
+        )
+    )
+
+    entered_by_skill = {}
+    if entries is not None and not entries.empty:
+        sector_column = "entered_sector" if "entered_sector" in entries.columns else "sector_proxy"
+        for skill_uri, group in entries.groupby("skill_uri"):
+            entered_by_skill[skill_uri] = set(group[sector_column].dropna())
+
+    scores = []
+    for row in predictions.itertuples(index=False):
+        candidate = row.candidate_sector
+        adopted_sectors = entered_by_skill.get(row.skill_uri, set())
+        adopted_sectors = [sector for sector in adopted_sectors if sector in sector_vectors.index]
+
+        if candidate not in sector_vectors.index or not adopted_sectors:
+            scores.append(0.0)
+            continue
+
+        candidate_vector = sector_vectors.loc[candidate].to_numpy(dtype=float)
+        candidate_norm = np.linalg.norm(candidate_vector)
+        if np.isclose(candidate_norm, 0):
+            scores.append(0.0)
+            continue
+
+        similarities = []
+        for sector in adopted_sectors:
+            sector_vector = sector_vectors.loc[sector].to_numpy(dtype=float)
+            denominator = candidate_norm * np.linalg.norm(sector_vector)
+            if np.isclose(denominator, 0):
+                continue
+            similarities.append(float(np.dot(candidate_vector, sector_vector) / denominator))
+
+        scores.append(max(similarities) if similarities else 0.0)
+
+    predictions["sector_similarity_score"] = scores
+    return predictions
+
+
+def build_prediction_reason(row):
+    reasons = []
+    if row.profile_growth_score >= 0.5:
+        reasons.append("profile adoption is growing")
+    if row.job_demand_score >= 0.5:
+        reasons.append("high job demand")
+    if row.job_demand_growth_score >= 0.5:
+        reasons.append("job demand is increasing")
+    if row.sector_similarity_score >= 0.5:
+        reasons.append("similar sectors already adopted it")
+    if row.recent_adoption_score >= 0.5:
+        reasons.append("recent adoption is visible")
+    return "; ".join(reasons) if reasons else "weak early signal"
+
+
+def min_max_score(series):
+    series = pd.Series(series).fillna(0).astype(float)
+    minimum = series.min()
+    maximum = series.max()
+    if np.isclose(maximum, minimum):
+        return pd.Series(np.where(series > 0, 1.0, 0.0), index=series.index)
+    return (series - minimum) / (maximum - minimum)

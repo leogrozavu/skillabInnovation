@@ -1,11 +1,9 @@
-import requests
-
 from .config import SKILLAB_BASE_URL
 
 
 class SkillabClient:
     def __init__(self, base_url=SKILLAB_BASE_URL, token=None, timeout=30):
-        self.base_url = base_url.rstrip("/")
+        self.base_url = base_url.rstrip("/").removesuffix("/api")
         self.token = token
         self.timeout = timeout
 
@@ -16,6 +14,8 @@ class SkillabClient:
         return {"Authorization": f"Bearer {self.token}"}
 
     def login(self, username, password):
+        import requests
+
         response = requests.post(
             f"{self.base_url}/api/login",
             json={"username": username, "password": password},
@@ -26,6 +26,8 @@ class SkillabClient:
         return self.token
 
     def post_form(self, path, data=None, params=None):
+        import requests
+
         response = requests.post(
             f"{self.base_url}{path}",
             data=data or {},
@@ -37,6 +39,8 @@ class SkillabClient:
         return response.json()
 
     def get(self, path, params=None):
+        import requests
+
         response = requests.get(
             f"{self.base_url}{path}",
             params=params or {},
@@ -71,4 +75,3 @@ class SkillabClient:
         if to_date:
             params["to_date"] = to_date
         return self.get("/api/descriptive-analytics/jobs", params=params)
-

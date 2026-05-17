@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 
@@ -8,5 +9,5 @@ DEFAULT_ESCO_SKILLS_PATH = Path.home() / "Downloads" / "mapping_of_ESCO_skills.x
 DEFAULT_ESCO_OCCUPATIONS_PATH = Path.home() / "Downloads" / "mapping_of_ESCO_occupations.xlsx"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "data" / "processed"
 
-SKILLAB_BASE_URL = "https://skillab-tracker.csd.auth.gr"
-
+TRACKER_API_URL = os.getenv("TRACKER_API", "https://skillab-tracker.csd.auth.gr/api")
+SKILLAB_BASE_URL = TRACKER_API_URL.removesuffix("/api")

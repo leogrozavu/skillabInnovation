@@ -41,6 +41,28 @@ python linkedin_profile.py --min-mentions 3 --min-adoption-rate 0.002
 python linkedin_profile.py --require-stability
 ```
 
+To blend Skillab job demand into predictions, provide a bearer token or credentials:
+
+```bash
+export TRACKER_API="https://skillab-tracker.csd.auth.gr/api"
+export TRACKER_USERNAME="event_public"
+export TRACKER_PASSWORD="PublicOnly2026"
+python linkedin_profile.py --use-skillab-demand --limit-files 5
+```
+
+You can also use `SKILLAB_TOKEN` / `SKILLAB_USERNAME` / `SKILLAB_PASSWORD`.
+
+With a baseline/current demand comparison:
+
+```bash
+python linkedin_profile.py \
+  --use-skillab-demand \
+  --demand-baseline-from-date 2023-01-01 \
+  --demand-baseline-to-date 2023-12-31 \
+  --demand-current-from-date 2024-01-01 \
+  --demand-current-to-date 2024-12-31
+```
+
 ## Outputs
 
 - `profile_skill_sector.parquet`: normalized profile-skill-occupation-sector rows.
@@ -49,3 +71,15 @@ python linkedin_profile.py --require-stability
 - `diffusion_events.csv`: migration events after origin detection.
 - `diffusion_leaderboard.csv`: ranked skills by diffusion score.
 - `next_sector_predictions.csv`: simple next-sector predictions.
+- `job_demand_signals.csv`: Skillab job demand signal per skill, when `--use-skillab-demand` is enabled.
+
+`next_sector_predictions.csv` includes separate score components:
+
+- `profile_growth_score`
+- `recent_adoption_score`
+- `global_profile_growth_score`
+- `job_demand_score`
+- `job_demand_growth_score`
+- `sector_similarity_score`
+- `prediction_score`
+- `reason`
