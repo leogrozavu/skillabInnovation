@@ -7,6 +7,7 @@ from .api_client import SkillabClient
 
 
 ID_KEYS = (
+    "Var1",
     "skill_id",
     "skill_uri",
     "id",
@@ -23,6 +24,8 @@ LABEL_KEYS = (
     "skill",
 )
 COUNT_KEYS = (
+    "Freq",
+    "freq",
     "count",
     "appearances",
     "frequency",
