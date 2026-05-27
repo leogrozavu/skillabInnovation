@@ -23,7 +23,7 @@ def parse_args():
         default=5,
         help="Number of profile parquet files to process. Use 0 for all files.",
     )
-    parser.add_argument("--min-mentions", type=int, default=3)
+    parser.add_argument("--min-mentions", type=int, default=2)
     parser.add_argument("--min-adoption-rate", type=float, default=0.005)
     parser.add_argument(
         "--require-stability",
@@ -45,6 +45,11 @@ def parse_args():
     parser.add_argument("--demand-baseline-from-date")
     parser.add_argument("--demand-baseline-to-date")
     parser.add_argument("--demand-timeout", type=int, default=60)
+    parser.add_argument(
+        "--skip-artifacts",
+        action="store_true",
+        help="Skip report, pitch outline, sensitivity tables, and SVG charts.",
+    )
     return parser.parse_args()
 
 
@@ -70,6 +75,7 @@ def main():
         demand_baseline_from_date=args.demand_baseline_from_date,
         demand_baseline_to_date=args.demand_baseline_to_date,
         demand_timeout=args.demand_timeout,
+        generate_artifacts=not args.skip_artifacts,
     )
 
 

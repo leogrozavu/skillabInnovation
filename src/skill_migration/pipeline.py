@@ -16,6 +16,7 @@ from .demand import fetch_job_demand_signals
 from .esco import load_occupation_mapping, load_skill_mapping
 from .features import aggregate_skill_sector_year, build_profile_skill_sector_table
 from .profiles import explode_profile_skills_occupations, load_profiles
+from .reporting import generate_jury_artifacts
 
 
 def run_pipeline(
@@ -24,7 +25,7 @@ def run_pipeline(
     occupations_path=DEFAULT_ESCO_OCCUPATIONS_PATH,
     output_dir=DEFAULT_OUTPUT_DIR,
     limit_files=5,
-    min_mentions=3,
+    min_mentions=2,
     min_adoption_rate=0.005,
     require_stability=False,
     use_skillab_demand=False,
@@ -38,6 +39,7 @@ def run_pipeline(
     demand_baseline_from_date=None,
     demand_baseline_to_date=None,
     demand_timeout=60,
+    generate_artifacts=True,
 ):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -106,7 +108,29 @@ def run_pipeline(
     leaderboard.to_csv(output_dir / "diffusion_leaderboard.csv", index=False)
     predictions.to_csv(output_dir / "next_sector_predictions.csv", index=False)
 
+    artifacts_dir = None
+    if generate_artifacts:
+        print("Generating jury artefacts...")
+        artifacts_dir = generate_jury_artifacts(
+            output_dir,
+            profiles,
+            profile_skill_sector,
+            skill_sector_year,
+            entries,
+            diffusion_events,
+            leaderboard,
+            predictions,
+            job_demand=job_demand,
+            params={
+                "min_mentions": min_mentions,
+                "min_adoption_rate": min_adoption_rate,
+                "require_stability": require_stability,
+            },
+        )
+
     print(f"Outputs written to {output_dir}")
+    if artifacts_dir:
+        print(f"Jury artefacts written to {artifacts_dir}")
     print_summary(leaderboard, diffusion_events, predictions)
 
     return {
@@ -118,6 +142,7 @@ def run_pipeline(
         "leaderboard": leaderboard,
         "predictions": predictions,
         "job_demand": job_demand,
+        "artifacts_dir": artifacts_dir,
     }
 
 
@@ -164,11 +189,12 @@ def print_summary(leaderboard, diffusion_events, predictions):
         print("No predictions available.")
     else:
         print(
-            predictions[
+            predictions.sort_values("prediction_score", ascending=False)[
                 [
                     "skill_label",
                     "candidate_sector",
                     "prediction_score",
+                    "evidence_support_score",
                     "job_demand_score",
                     "sector_similarity_score",
                     "recent_adoption_rate",

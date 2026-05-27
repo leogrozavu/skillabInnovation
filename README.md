@@ -37,8 +37,9 @@ Useful options:
 ```bash
 python linkedin_profile.py --limit-files 10
 python linkedin_profile.py --limit-files 0
-python linkedin_profile.py --min-mentions 3 --min-adoption-rate 0.002
+python linkedin_profile.py --min-mentions 2 --min-adoption-rate 0.002
 python linkedin_profile.py --require-stability
+python linkedin_profile.py --skip-artifacts
 ```
 
 To blend Skillab job demand into predictions, provide a bearer token or credentials:
@@ -72,10 +73,24 @@ python linkedin_profile.py \
 - `diffusion_leaderboard.csv`: ranked skills by diffusion score.
 - `next_sector_predictions.csv`: simple next-sector predictions.
 - `job_demand_signals.csv`: Skillab job demand signal per skill, when `--use-skillab-demand` is enabled.
+- `jury_artifacts/`: report, pitch outline, threshold diagnostics, bridge-skill evidence, sector convergence, and SVG charts for the submission package.
+
+The jury artefacts are designed to make the project easier to evaluate:
+
+- `report.md`: written report with executive summary, methodology, findings, sensitivity checks, and limitations.
+- `pitch_outline.md`: six-slide pitch structure.
+- `pitch_deck.html`: browser-ready pitch deck that uses the generated SVG visuals.
+- `submission_manifest.md`: checklist mapping files to Code, Results, Report, and Pitch artefacts.
+- `metrics_summary.json`: run-level reproducibility metrics.
+- `threshold_sensitivity.csv`: how entries/diffusion events change under stricter or looser thresholds.
+- `bridge_skills.csv`: skills with the broadest cross-sector footprint.
+- `sector_convergence.csv`: sector pairs with similar skill adoption patterns.
+- `top_diffusion_or_entries.svg`, `next_sector_radar.svg`, `sector_skill_heatmap.svg`: ready-to-use visuals for the report or pitch.
 
 `next_sector_predictions.csv` includes separate score components:
 
 - `profile_growth_score`
+- `evidence_support_score`
 - `recent_adoption_score`
 - `global_profile_growth_score`
 - `job_demand_score`

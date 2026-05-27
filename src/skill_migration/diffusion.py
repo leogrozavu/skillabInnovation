@@ -208,6 +208,7 @@ def predict_next_sectors(
         how="left",
     )
     predictions["global_growth"] = predictions["global_growth"].fillna(0)
+    predictions["evidence_support_score"] = min_max_score(np.log1p(predictions["recent_mentions"]))
     predictions["profile_growth_score"] = min_max_score(
         predictions["growth_rate"].clip(lower=0)
     )
@@ -220,9 +221,10 @@ def predict_next_sectors(
     predictions = add_sector_similarity_score(predictions, recent, diffusion_events)
     predictions = add_job_demand_scores(predictions, job_demand)
     predictions["prediction_score"] = (
-        0.30 * predictions["profile_growth_score"]
-        + 0.15 * predictions["recent_adoption_score"]
+        0.20 * predictions["profile_growth_score"]
+        + 0.10 * predictions["recent_adoption_score"]
         + 0.15 * predictions["global_profile_growth_score"]
+        + 0.15 * predictions["evidence_support_score"]
         + 0.25 * predictions["job_demand_score"]
         + 0.10 * predictions["job_demand_growth_score"]
         + 0.05 * predictions["sector_similarity_score"]
@@ -323,6 +325,8 @@ def build_prediction_reason(row):
         reasons.append("high job demand")
     if row.job_demand_growth_score >= 0.5:
         reasons.append("job demand is increasing")
+    if row.evidence_support_score >= 0.5:
+        reasons.append("repeated recent profile evidence")
     if row.sector_similarity_score >= 0.5:
         reasons.append("similar sectors already adopted it")
     if row.recent_adoption_score >= 0.5:
