@@ -127,6 +127,7 @@ def normalize_job_demand_rows(rows, count_column):
         nested_skill = row.get("skill")
         if isinstance(nested_skill, dict):
             skill_uri = skill_uri or first_present(nested_skill, ID_KEYS)
+            label = first_present(nested_skill, LABEL_KEYS) if isinstance(label, dict) else label
             label = label or first_present(nested_skill, LABEL_KEYS)
 
         if not skill_uri:

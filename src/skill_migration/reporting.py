@@ -127,6 +127,12 @@ def build_metrics(
         "diffusing_skills": int(leaderboard["skill_uri"].nunique()) if not leaderboard.empty else 0,
         "predicted_skill_sector_pairs": int(len(predictions)),
         "job_demand_signals": int(len(job_demand)) if job_demand is not None else 0,
+        "generic_skill_entries": int(entries["is_generic_skill"].sum())
+        if "is_generic_skill" in entries
+        else 0,
+        "generic_skill_predictions": int(predictions["is_generic_skill"].sum())
+        if "is_generic_skill" in predictions
+        else 0,
     }
 
 
@@ -298,7 +304,42 @@ def build_report_markdown(
         entries.sort_values(["entry_mentions", "entry_adoption_rate"], ascending=[False, False])
         if not entries.empty
         else entries,
+        [
+            "skill_label",
+            "entered_sector",
+            "entered_year",
+            "entry_mentions",
+            "entry_adoption_rate",
+            "entry_profiles_in_sector_year",
+        ],
+    )
+    strong_entries_df = strong_evidence_entries(entries, params)
+    weak_entries_df = weak_evidence_entries(entries, params)
+    generic_entries_df = (
+        entries[entries["is_generic_skill"]].copy()
+        if "is_generic_skill" in entries and not entries.empty
+        else pd.DataFrame()
+    )
+    top_strong_entries = top_rows(
+        strong_entries_df.sort_values(["entry_mentions", "entry_adoption_rate"], ascending=[False, False])
+        if not strong_entries_df.empty
+        else strong_entries_df,
         ["skill_label", "entered_sector", "entered_year", "entry_mentions", "entry_adoption_rate"],
+        fallback="No strong-evidence entries were detected at the selected threshold.",
+    )
+    top_weak_entries = top_rows(
+        weak_entries_df.sort_values(["entry_mentions", "entry_adoption_rate"], ascending=[True, False])
+        if not weak_entries_df.empty
+        else weak_entries_df,
+        ["skill_label", "entered_sector", "entered_year", "entry_mentions", "entry_adoption_rate"],
+        fallback="No weak-evidence entries were detected at the selected threshold.",
+    )
+    top_generic_entries = top_rows(
+        generic_entries_df.sort_values(["entry_mentions", "entry_adoption_rate"], ascending=[False, False])
+        if not generic_entries_df.empty
+        else generic_entries_df,
+        ["skill_label", "entered_sector", "entered_year", "entry_mentions", "entry_adoption_rate"],
+        fallback="No configured generic skills appeared in the selected entries.",
     )
     top_bridge = top_rows(
         bridge_skills,
@@ -308,7 +349,14 @@ def build_report_markdown(
         predictions.sort_values(["recent_mentions", "prediction_score"], ascending=[False, False])
         if not predictions.empty
         else predictions,
-        ["skill_label", "candidate_sector", "recent_mentions", "prediction_score", "reason"],
+        [
+            "skill_label",
+            "candidate_sector",
+            "recent_mentions",
+            "prediction_score",
+            "confidence_band",
+            "reason",
+        ],
     )
     top_convergence = top_rows(
         sector_convergence,
@@ -328,6 +376,9 @@ def build_report_markdown(
         ],
         limit=12,
     )
+    weak_entries_count = len(weak_entries_df)
+    demand_note = demand_usage_note(metrics, predictions)
+    example_interpretation = build_example_interpretation(entries, predictions)
 
     return f"""# SKILLAB Skill Migration Radar
 
@@ -335,7 +386,7 @@ def build_report_markdown(
 
 This package turns ESCO profile histories and optional SKILLAB Tracker demand signals into a reproducible radar for skill movement across occupation-derived sectors. The current run covers **{metrics["profiles"]:,} profiles**, **{metrics["unique_skills"]:,} ESCO skills**, **{metrics["sectors"]} sector proxies**, and years **{metrics["year_min"]}-{metrics["year_max"]}**.
 
-At the selected threshold it detected **{metrics["sector_entries"]:,} sector entries**, **{metrics["diffusion_events"]:,} strict diffusion events**, and **{metrics["predicted_skill_sector_pairs"]:,} next-sector opportunities**. The strict diffusion output is intentionally conservative; the threshold sensitivity table shows how many events appear under more exploratory settings.
+At the selected threshold it detected **{metrics["sector_entries"]:,} sector entries**, **{metrics["diffusion_events"]:,} strict diffusion events**, and **{metrics["predicted_skill_sector_pairs"]:,} next-sector opportunities**. **{weak_entries_count:,} entries** are weak-evidence signals by the configured thresholds and should be inspected before being used as headline findings. {demand_note}
 
 ## Main Findings
 
@@ -346,6 +397,18 @@ At the selected threshold it detected **{metrics["sector_entries"]:,} sector ent
 ### First Stable Sector Entries
 
 {top_entries}
+
+### Strong Evidence Entries
+
+{top_strong_entries}
+
+### Weak Evidence Entries
+
+{top_weak_entries}
+
+### Configured Generic Skills
+
+{top_generic_entries}
 
 ### Cross-sector Bridge Skills
 
@@ -359,13 +422,22 @@ At the selected threshold it detected **{metrics["sector_entries"]:,} sector ent
 
 {top_convergence}
 
+## How to Interpret the Outputs
+
+- `sector_entries.csv` shows the first year a skill passed the entry thresholds in a sector. Use `entry_mentions`, `entry_adoption_rate`, and `entry_profiles_in_sector_year` together; a high rate with few mentions is weaker evidence.
+- `diffusion_events.csv` treats later sector entries as migration events after the inferred origin sector. This is temporal evidence, not proof that one sector caused another to adopt the skill.
+- `diffusion_leaderboard.csv` ranks skills by spread across sectors and sector entropy. Use it for prioritisation, then validate the underlying entry rows.
+- `next_sector_predictions.csv` is a ranking, not a probability model. `confidence_band` is derived from the relative prediction score: low signals need manual validation, medium signals are plausible leads, and high signals are the strongest candidates in this run.
+
+Example: {example_interpretation}
+
 ## Methodology
 
 1. Load profile parquet files and ESCO skill/occupation mappings.
 2. Explode each profile into profile-skill-occupation rows.
 3. Map occupations to sector proxies from ISCO prefixes.
 4. Calculate annual skill adoption rate per sector: unique profiles mentioning a skill divided by profiles in that sector-year.
-5. Detect first sector entry when mentions and adoption rate pass configured thresholds.
+5. Detect first sector entry when mentions, adoption rate, and minimum sector-year profile count pass configured thresholds.
 6. Build diffusion events when a skill enters another sector after its origin sector.
 7. Rank next-sector opportunities using recent profile growth, recent adoption, global growth, optional job demand, demand growth, and sector similarity.
 
@@ -383,11 +455,64 @@ At the selected threshold it detected **{metrics["sector_entries"]:,} sector ent
 ## Reproduction
 
 ```bash
-python linkedin_profile.py --min-mentions {params.get("min_mentions", 2)} --min-adoption-rate {params.get("min_adoption_rate", 0.005)}
+python linkedin_profile.py --min-mentions {params.get("min_mentions", 2)} --min-adoption-rate {params.get("min_adoption_rate", 0.005)} --min-sector-year-profiles {params.get("min_sector_year_profiles", 50)} --require-stability
 ```
 
 Generated jury artefacts are in `data/processed/jury_artifacts/`.
 """
+
+
+def strong_evidence_entries(entries, params):
+    if entries is None or entries.empty:
+        return pd.DataFrame()
+    min_mentions = int(params.get("min_mentions", 2))
+    generic = (
+        entries["is_generic_skill"]
+        if "is_generic_skill" in entries
+        else pd.Series(False, index=entries.index)
+    )
+    return entries[
+        (entries["entry_mentions"] >= max(min_mentions * 2, min_mentions + 2))
+        & (~generic)
+    ].copy()
+
+
+def weak_evidence_entries(entries, params):
+    if entries is None or entries.empty:
+        return pd.DataFrame()
+    min_mentions = int(params.get("min_mentions", 2))
+    weak = entries["entry_mentions"] <= min_mentions
+    if "is_generic_skill" in entries:
+        weak = weak | entries["is_generic_skill"]
+    return entries[weak].copy()
+
+
+def demand_usage_note(metrics, predictions):
+    if metrics.get("job_demand_signals", 0) == 0:
+        return "No Skillab Tracker demand signals were loaded, so demand score columns are zero and predictions rely on profile evidence plus sector similarity."
+    if predictions is not None and not predictions.empty and "job_demand_score" in predictions:
+        nonzero = int((predictions["job_demand_score"] > 0).sum())
+        return f"Skillab Tracker demand contributed to {nonzero:,} prediction rows."
+    return "Skillab Tracker demand signals were loaded for this run."
+
+
+def build_example_interpretation(entries, predictions):
+    if entries is not None and not entries.empty:
+        row = entries.sort_values(["entry_mentions", "entry_adoption_rate"], ascending=[False, False]).iloc[0]
+        return (
+            f"`{row['skill_label']}` first passed the entry threshold in "
+            f"`{row['entered_sector']}` in {int(row['entered_year'])}, with "
+            f"{int(row['entry_mentions'])} profile mentions and adoption rate "
+            f"{float(row['entry_adoption_rate']):.4f}."
+        )
+    if predictions is not None and not predictions.empty:
+        row = predictions.sort_values("prediction_score", ascending=False).iloc[0]
+        return (
+            f"`{row['skill_label']}` is ranked for `{row['candidate_sector']}` with "
+            f"score {float(row['prediction_score']):.3f} and confidence "
+            f"`{row.get('confidence_band', 'unknown')}`."
+        )
+    return "No example row is available because the current run produced no entries or predictions."
 
 
 def build_pitch_markdown(metrics, leaderboard, bridge_skills, predictions):

@@ -26,9 +26,20 @@ def parse_args():
     parser.add_argument("--min-mentions", type=int, default=2)
     parser.add_argument("--min-adoption-rate", type=float, default=0.005)
     parser.add_argument(
+        "--min-sector-year-profiles",
+        type=int,
+        default=50,
+        help="Minimum profiles required in a sector-year before an entry can be detected.",
+    )
+    parser.add_argument(
         "--require-stability",
         action="store_true",
         help="Require an entry threshold to be met in two consecutive years.",
+    )
+    parser.add_argument(
+        "--exclude-generic-skills",
+        action="store_true",
+        help="Exclude broad generic skills from leaderboard and next-sector predictions.",
     )
     parser.add_argument(
         "--use-skillab-demand",
@@ -63,7 +74,9 @@ def main():
         limit_files=args.limit_files or None,
         min_mentions=args.min_mentions,
         min_adoption_rate=args.min_adoption_rate,
+        min_sector_year_profiles=args.min_sector_year_profiles,
         require_stability=args.require_stability,
+        exclude_generic_skills=args.exclude_generic_skills,
         use_skillab_demand=args.use_skillab_demand,
         skillab_username=args.skillab_username,
         skillab_password=args.skillab_password,

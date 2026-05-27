@@ -1,17 +1,26 @@
 import numpy as np
 import pandas as pd
 
+from .config import DEFAULT_MIN_SECTOR_YEAR_PROFILES, PREDICTION_SCORE_WEIGHTS
+
 
 def detect_sector_entries(
     skill_sector_year,
     min_mentions=3,
     min_adoption_rate=0.005,
+    min_sector_year_profiles=DEFAULT_MIN_SECTOR_YEAR_PROFILES,
     require_stability=False,
 ):
     df = skill_sector_year.copy()
+    if "is_generic_skill" not in df.columns:
+        df["is_generic_skill"] = False
+    if "profiles_in_sector_year" not in df.columns:
+        df["profiles_in_sector_year"] = np.inf
+
     df["passes_threshold"] = (
         (df["mentions"] >= min_mentions)
         & (df["adoption_rate"] >= min_adoption_rate)
+        & (df["profiles_in_sector_year"] >= min_sector_year_profiles)
     )
 
     if require_stability:
@@ -26,7 +35,7 @@ def detect_sector_entries(
     entries = df[df["stable_entry"]].copy()
     entries = (
         entries.sort_values(["skill_uri", "sector_proxy", "year"])
-        .groupby(["skill_uri", "skill_label", "sector_proxy"], as_index=False)
+        .groupby(["skill_uri", "skill_label", "is_generic_skill", "sector_proxy"], as_index=False)
         .first()
     )
     entries = entries.rename(
@@ -35,16 +44,19 @@ def detect_sector_entries(
             "year": "entered_year",
             "mentions": "entry_mentions",
             "adoption_rate": "entry_adoption_rate",
+            "profiles_in_sector_year": "entry_profiles_in_sector_year",
         }
     )
     return entries[
         [
             "skill_uri",
             "skill_label",
+            "is_generic_skill",
             "entered_sector",
             "entered_year",
             "entry_mentions",
             "entry_adoption_rate",
+            "entry_profiles_in_sector_year",
         ]
     ]
 
@@ -55,6 +67,7 @@ def build_diffusion_events(entries):
             columns=[
                 "skill_uri",
                 "skill_label",
+                "is_generic_skill",
                 "origin_sector",
                 "origin_year",
                 "entered_sector",
@@ -62,6 +75,7 @@ def build_diffusion_events(entries):
                 "delay_years",
                 "entry_mentions",
                 "entry_adoption_rate",
+                "entry_profiles_in_sector_year",
             ]
         )
 
@@ -70,17 +84,17 @@ def build_diffusion_events(entries):
             ["skill_uri", "entered_year", "entry_adoption_rate", "entry_mentions"],
             ascending=[True, True, False, False],
         )
-        .groupby(["skill_uri", "skill_label"], as_index=False)
+        .groupby(["skill_uri", "skill_label", "is_generic_skill"], as_index=False)
         .first()
         .rename(
             columns={
                 "entered_sector": "origin_sector",
                 "entered_year": "origin_year",
             }
-        )[["skill_uri", "skill_label", "origin_sector", "origin_year"]]
+        )[["skill_uri", "skill_label", "is_generic_skill", "origin_sector", "origin_year"]]
     )
 
-    events = entries.merge(origins, on=["skill_uri", "skill_label"], how="left")
+    events = entries.merge(origins, on=["skill_uri", "skill_label", "is_generic_skill"], how="left")
     events = events[events["entered_sector"] != events["origin_sector"]].copy()
     events["delay_years"] = events["entered_year"] - events["origin_year"]
     events = events[events["delay_years"] > 0]
@@ -93,6 +107,7 @@ def diffusion_leaderboard(diffusion_events, skill_sector_year):
             columns=[
                 "skill_uri",
                 "skill_label",
+                "is_generic_skill",
                 "origin_sector",
                 "origin_year",
                 "sectors_reached",
@@ -104,7 +119,8 @@ def diffusion_leaderboard(diffusion_events, skill_sector_year):
 
     sector_counts = (
         diffusion_events.groupby(
-            ["skill_uri", "skill_label", "origin_sector", "origin_year"], as_index=False
+            ["skill_uri", "skill_label", "is_generic_skill", "origin_sector", "origin_year"],
+            as_index=False,
         )
         .agg(
             sectors_reached=("entered_sector", "nunique"),
@@ -152,8 +168,15 @@ def predict_next_sectors(
     job_demand=None,
     lookback_years=3,
     top_n=5,
+    exclude_generic_skills=False,
 ):
     df = skill_sector_year.copy()
+    if df.empty:
+        return pd.DataFrame()
+    if "is_generic_skill" not in df.columns:
+        df["is_generic_skill"] = False
+    if exclude_generic_skills:
+        df = df[~df["is_generic_skill"]].copy()
     if df.empty:
         return pd.DataFrame()
 
@@ -161,8 +184,8 @@ def predict_next_sectors(
     recent = df[df["year"] >= max_year - lookback_years + 1].copy()
 
     growth = []
-    for (skill_uri, skill_label, sector), group in recent.groupby(
-        ["skill_uri", "skill_label", "sector_proxy"]
+    for (skill_uri, skill_label, is_generic_skill, sector), group in recent.groupby(
+        ["skill_uri", "skill_label", "is_generic_skill", "sector_proxy"]
     ):
         group = group.sort_values("year")
         first = group.iloc[0]["adoption_rate"]
@@ -171,6 +194,7 @@ def predict_next_sectors(
             {
                 "skill_uri": skill_uri,
                 "skill_label": skill_label,
+                "is_generic_skill": bool(is_generic_skill),
                 "candidate_sector": sector,
                 "recent_adoption_rate": last,
                 "growth_rate": last - first,
@@ -182,7 +206,10 @@ def predict_next_sectors(
     if predictions.empty:
         return predictions
 
-    already_entered = diffusion_events[["skill_uri", "entered_sector"]].drop_duplicates()
+    if diffusion_events is None or diffusion_events.empty:
+        already_entered = pd.DataFrame(columns=["skill_uri", "entered_sector"])
+    else:
+        already_entered = diffusion_events[["skill_uri", "entered_sector"]].drop_duplicates()
     already_entered["already_entered"] = True
     predictions = predictions.merge(
         already_entered,
@@ -220,15 +247,8 @@ def predict_next_sectors(
     )
     predictions = add_sector_similarity_score(predictions, recent, diffusion_events)
     predictions = add_job_demand_scores(predictions, job_demand)
-    predictions["prediction_score"] = (
-        0.20 * predictions["profile_growth_score"]
-        + 0.10 * predictions["recent_adoption_score"]
-        + 0.15 * predictions["global_profile_growth_score"]
-        + 0.15 * predictions["evidence_support_score"]
-        + 0.25 * predictions["job_demand_score"]
-        + 0.10 * predictions["job_demand_growth_score"]
-        + 0.05 * predictions["sector_similarity_score"]
-    )
+    predictions["prediction_score"] = calculate_prediction_score(predictions)
+    predictions["confidence_band"] = predictions["prediction_score"].apply(confidence_band)
     predictions["reason"] = predictions.apply(build_prediction_reason, axis=1)
 
     return (
@@ -332,6 +352,23 @@ def build_prediction_reason(row):
     if row.recent_adoption_score >= 0.5:
         reasons.append("recent adoption is visible")
     return "; ".join(reasons) if reasons else "weak early signal"
+
+
+def calculate_prediction_score(predictions, weights=None):
+    weights = weights or PREDICTION_SCORE_WEIGHTS
+    score = pd.Series(0.0, index=predictions.index)
+    for column, weight in weights.items():
+        if column in predictions.columns:
+            score = score + weight * predictions[column].fillna(0).astype(float)
+    return score
+
+
+def confidence_band(score):
+    if score >= 0.35:
+        return "high"
+    if score >= 0.15:
+        return "medium"
+    return "low"
 
 
 def min_max_score(series):

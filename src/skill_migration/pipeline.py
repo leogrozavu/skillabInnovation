@@ -27,7 +27,9 @@ def run_pipeline(
     limit_files=5,
     min_mentions=2,
     min_adoption_rate=0.005,
+    min_sector_year_profiles=50,
     require_stability=False,
+    exclude_generic_skills=False,
     use_skillab_demand=False,
     skillab_username=None,
     skillab_password=None,
@@ -72,10 +74,16 @@ def run_pipeline(
         skill_sector_year,
         min_mentions=min_mentions,
         min_adoption_rate=min_adoption_rate,
+        min_sector_year_profiles=min_sector_year_profiles,
         require_stability=require_stability,
     )
     diffusion_events = build_diffusion_events(entries)
-    leaderboard = diffusion_leaderboard(diffusion_events, skill_sector_year)
+    leaderboard_events = diffusion_events
+    prediction_skill_sector_year = skill_sector_year
+    if exclude_generic_skills:
+        leaderboard_events = diffusion_events[~diffusion_events["is_generic_skill"]].copy()
+        prediction_skill_sector_year = skill_sector_year[~skill_sector_year["is_generic_skill"]].copy()
+    leaderboard = diffusion_leaderboard(leaderboard_events, prediction_skill_sector_year)
 
     job_demand = None
     if use_skillab_demand:
@@ -96,9 +104,10 @@ def run_pipeline(
         print(f"Loaded {len(job_demand):,} job demand skill signals")
 
     predictions = predict_next_sectors(
-        skill_sector_year,
+        prediction_skill_sector_year,
         entries,
         job_demand=job_demand,
+        exclude_generic_skills=exclude_generic_skills,
     )
 
     profile_skill_sector.to_parquet(output_dir / "profile_skill_sector.parquet", index=False)
@@ -124,7 +133,9 @@ def run_pipeline(
             params={
                 "min_mentions": min_mentions,
                 "min_adoption_rate": min_adoption_rate,
+                "min_sector_year_profiles": min_sector_year_profiles,
                 "require_stability": require_stability,
+                "exclude_generic_skills": exclude_generic_skills,
             },
         )
 
